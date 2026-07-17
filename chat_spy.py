@@ -7,7 +7,8 @@ import threading
 import pystray
 from PIL import Image, ImageDraw
 
-CONFIG_FILE = 'chat_spy_user.json'
+# Ficheiro local para guardar o seu utilizador e o caminho da pasta
+CONFIG_FILE = 'config_local.dat'
 
 class ChatSpy:
     def __init__(self):
@@ -22,7 +23,7 @@ class ChatSpy:
         
         # Janela Principal (Translúcida)
         self.root = tk.Tk()
-        self.root.title("SpyChat")
+        self.root.title("log de erros")
         self.root.geometry("300x400")
         self.root.attributes('-alpha', 0.8)  # Transparência a 80%
         self.root.attributes('-topmost', True)  # Mantém sempre no topo
@@ -55,7 +56,7 @@ class ChatSpy:
         self.tray_icon = None
         self.setup_tray()
         
-        # Ciclo de verificação de mensagens (sem threads para evitar conflitos de UI no Tkinter)
+        # Ciclo de verificação de mensagens
         self.root.after(1000, self.check_messages)
         
         # Inicia a configuração inicial após o arranque da janela
@@ -74,7 +75,7 @@ class ChatSpy:
             pystray.MenuItem("Abrir", self.show_window, default=True),
             pystray.MenuItem("Sair", self.quit_app)
         )
-        self.tray_icon = pystray.Icon("chat_spy", icon_image, "...", menu)
+        self.tray_icon = pystray.Icon("log_de_erros", icon_image, "...", menu)
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
 
     def update_tray_icon(self, color):
@@ -87,7 +88,7 @@ class ChatSpy:
 
     def show_window(self, icon=None, item=None):
         self.root.deiconify()
-        self.update_tray_icon("black") # Torna o ícone preto novamente ao abrir
+        self.update_tray_icon("black")
 
     def quit_app(self, icon=None, item=None):
         if self.tray_icon:
@@ -114,31 +115,35 @@ class ChatSpy:
     def check_initial_setup(self):
         # Pergunta o nome na primeira execução
         if not self.username:
-            name = simpledialog.askstring("Utilizador", "Escolha o seu nome de utilizador:", initialvalue="Matheus")
+            name = simpledialog.askstring("Configuração", "Escolha o seu nome no chat:", initialvalue="Matheus")
             if name:
                 self.username = name
                 self.save_config()
             else:
                 self.username = "Anonimo"
         
-        # Pergunta o caminho da pasta partilhada na primeira execução
+        # Pergunta onde salvar o arquivo
         if not self.shared_folder:
             folder = simpledialog.askstring(
-                "Configuração", 
-                "Introduza o caminho da pasta partilhada na rede:\n(Exemplo: Z:\\ ou \\\\servidor\\pasta_partilhada)"
+                "Configuração de Diretório", 
+                "Onde deseja salvar o arquivo de comunicação na rede?\n(Exemplo: Z:\\ ou \\\\servidor\\pasta)"
             )
             if folder:
                 self.shared_folder = folder
                 self.save_config()
             else:
-                messagebox.showwarning("Aviso", "O chat necessita de uma pasta partilhada para funcionar.")
+                messagebox.showwarning("Aviso", "O programa precisa do diretório para funcionar corretamente.")
+
+    def get_room_filepath(self):
+        """Gera o nome do arquivo baseado na sala"""
+        return os.path.join(self.shared_folder, f"arquivo_cache_{self.current_room}.tpm")
 
     def open_room(self):
         if not self.shared_folder:
             self.check_initial_setup()
             return
             
-        room = simpledialog.askstring("Abrir Sala", "Nome da sala (ex: geral):")
+        room = simpledialog.askstring("Abrir", "Nome da sala:")
         if room:
             self.current_room = room.strip().lower()
             self.lbl_room.config(text=f"Sala: {self.current_room}")
@@ -147,22 +152,22 @@ class ChatSpy:
             
             self.chat_box.config(state=tk.NORMAL)
             self.chat_box.delete('1.0', tk.END)
-            self.chat_box.insert(tk.END, f"--- Entrou na sala: {self.current_room} ---\n")
+            self.chat_box.insert(tk.END, f"--- Iniciou: {self.current_room} ---\n")
             self.chat_box.config(state=tk.DISABLED)
             
-            # Cria o ficheiro da sala na pasta de rede se não existir
-            room_file = os.path.join(self.shared_folder, f"spy_room_{self.current_room}.json")
+            # Cria o arquivo tpm na pasta de rede se não existir
+            room_file = self.get_room_filepath()
             if not os.path.exists(room_file):
                 try:
                     with open(room_file, 'w', encoding='utf-8') as f:
                         json.dump([], f)
                 except Exception as e:
-                    messagebox.showerror("Erro de Permissão", f"Não foi possível gravar na pasta de rede:\n{e}")
+                    messagebox.showerror("Erro de Permissão", f"Não foi possível criar o arquivo no diretório:\n{e}")
 
     def close_room(self):
         self.chat_box.config(state=tk.NORMAL)
         self.chat_box.delete('1.0', tk.END)
-        self.chat_box.insert(tk.END, f"--- Sala {self.current_room} fechada ---\n")
+        self.chat_box.insert(tk.END, f"--- Fechou {self.current_room} ---\n")
         self.chat_box.config(state=tk.DISABLED)
         self.current_room = ""
         self.lbl_room.config(text="Sala: Nenhuma")
@@ -170,10 +175,9 @@ class ChatSpy:
     def send_message(self, event=None):
         msg = self.entry_msg.get().strip()
         if msg and self.username and self.current_room and self.shared_folder:
-            room_file = os.path.join(self.shared_folder, f"spy_room_{self.current_room}.json")
+            room_file = self.get_room_filepath()
             self.entry_msg.delete(0, tk.END)
             
-            # Escreve no ficheiro com retentativas rápidas para evitar conflito de escrita simultânea
             for _ in range(5):
                 try:
                     messages = []
@@ -191,17 +195,15 @@ class ChatSpy:
 
     def check_messages(self):
         if self.current_room and self.shared_folder:
-            room_file = os.path.join(self.shared_folder, f"spy_room_{self.current_room}.json")
+            room_file = self.get_room_filepath()
             if os.path.exists(room_file):
                 try:
                     mtime = os.path.getmtime(room_file)
-                    # Se o ficheiro foi modificado, lê as novas mensagens
                     if mtime > self.last_mtime:
                         self.last_mtime = mtime
                         self.load_messages(room_file)
                 except:
                     pass
-        # Repete a verificação a cada 1 segundo (1000ms)
         self.root.after(1000, self.check_messages)
 
     def load_messages(self, room_file):
@@ -222,7 +224,6 @@ class ChatSpy:
                 self.chat_box.config(state=tk.DISABLED)
                 self.loaded_messages_count = len(messages)
 
-                # Se a janela estiver em segundo plano ou fechada, muda o ponto do ícone para azul
                 if self.root.state() == 'withdrawn':
                     self.update_tray_icon("blue")
         except:
